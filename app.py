@@ -14,8 +14,9 @@ tile_pad = 10
 pre_pad = 0
 fp32 = False
 gpu_id = None
-output = 'results'
-path = 'inputs'
+output2 = '/content/Real-ESRGAN/results/'
+path = '/content/Real-ESRGAN/upload/'
+
 
 model = RRDBNet(num_in_ch=3, num_out_ch=3, num_feat=64, num_block=23, num_grow_ch=32, scale=4)
 netscale = 4
@@ -39,19 +40,46 @@ upsampler = RealESRGANer(
         pre_pad=pre_pad,
         half=not fp32,
         gpu_id=gpu_id)
-os.makedirs(output, exist_ok=True)
 
-img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-if len(img.shape) == 3 and img.shape[2] == 4:
-    img_mode = 'RGBA'
-else:
-    img_mode = None
+def upscale_image(from_path, to_path):
+    os.makedirs(to_path, exist_ok=True)
+    img = cv2.imread(from_path, cv2.IMREAD_UNCHANGED)
+    if len(img.shape) == 3 and img.shape[2] == 4:
+        img_mode = 'RGBA'
+    else:
+        img_mode = None
 
-output, _ = upsampler.enhance(img, outscale=4)
+    output, _ = upsampler.enhance(img, outscale=4)
 
 
-extension = f".{path.split('.')[-1]}"
-if img_mode == 'RGBA':  # RGBA images should be saved in png format
-    extension = 'png'
-save_path = os.path.join(output, f'_out.{extension}')
-cv2.imwrite(save_path, output)
+    imgname, extension = os.path.splitext(os.path.basename(from_path))
+    if img_mode == 'RGBA':  # RGBA images should be saved in png format
+        extension = '.png'
+    save_path = os.path.join(to_path, f'{imgname}{extension}')
+    cv2.imwrite(save_path, output)
+
+from fastapi import FastAPI
+from fastapi import File, UploadFile
+from fastapi.staticfiles import StaticFiles
+
+app = FastAPI()
+app.mount("/static", StaticFiles(directory="/content/Real-ESRGAN/results/"), name="results")
+
+@app.post("/upload")
+def upload(file: UploadFile = File(...)):
+    try:
+        contents = file.file.read()
+        iii = os.path.join("/content/Real-ESRGAN/upload/", file.filename)
+        with open(iii, 'wb') as f:
+            f.write(contents)
+        upscale_image(iii, output2)
+    except Exception:
+        return {"message": "There was an error uploading the file"}
+    finally:
+        file.file.close()
+
+    return {"message": f"Successfully uploaded {file.filename}"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000, log_level="debug")
